@@ -1,5 +1,5 @@
 # config.py
-RTSP_INPUT: str = "rtsp://localhost:8554/cam"
+RTSP_INPUT: str = "rtsp://192.168.50.48:8554/cam"
 RTSP_OUTPUT: str = "rtsp://localhost:8554/processed"
 
 INPUT_WIDTH: int = 640
