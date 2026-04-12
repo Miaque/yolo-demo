@@ -4,6 +4,7 @@ import signal
 import threading
 import time
 from datetime import datetime
+import cv2
 import numpy as np
 from loguru import logger
 import config
@@ -29,6 +30,40 @@ def _crop_with_margin(frame: np.ndarray, bbox: list[int]) -> np.ndarray:
     return frame[cy1:cy2, cx1:cx2].copy()
 
 
+def _load_known_faces() -> dict[str, np.ndarray]:
+    """启动时从 faces/ 目录加载已知人脸 embedding。"""
+    from pathlib import Path
+
+    from insightface.app import FaceAnalysis
+
+    faces_dir = Path(config.FACES_DIR)
+    if not faces_dir.is_dir():
+        logger.warning("Faces directory '{}' not found, all faces will be Unknown", config.FACES_DIR)
+        return {}
+
+    app = FaceAnalysis(name=config.INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
+    app.prepare(ctx_id=0, det_size=config.INSIGHTFACE_DET_SIZE)
+
+    known_faces: dict[str, np.ndarray] = {}
+    for img_path in sorted(faces_dir.iterdir()):
+        if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
+            continue
+        img = cv2.imread(str(img_path))
+        if img is None:
+            logger.warning("Cannot read image: {}", img_path)
+            continue
+        results = app.get(img)
+        if not results:
+            logger.warning("No face detected in: {}", img_path)
+            continue
+        name = img_path.stem
+        known_faces[name] = results[0].embedding
+        logger.info("Loaded known face: {}", name)
+
+    logger.info("Total known faces loaded: {}", len(known_faces))
+    return known_faces
+
+
 def run() -> None:
     stop_event = threading.Event()
 
@@ -39,10 +74,12 @@ def run() -> None:
     detector = FaceDetector()
     tracker = FaceTracker()
 
+    known_faces = _load_known_faces()
+
     output_path = f"{config.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
 
     reader = ReaderThread(frame_queue, stop_event)
-    embedder = EmbedderThread(face_crop_queue, stop_event)
+    embedder = EmbedderThread(face_crop_queue, stop_event, known_faces=known_faces)
     writer = WriterThread(output_queue, stop_event, output_path=output_path)
 
     known_ids: set[int] = set()
@@ -107,8 +144,8 @@ def run() -> None:
                     except queue.Full:
                         pass  # InsightFace 队列已满，跳过此帧
 
-            emb_snapshot = state.snapshot()
-            annotated = overlay.draw_tracks(frame, track_results, emb_snapshot)
+            emb_snapshot, name_snapshot = state.snapshot()
+            annotated = overlay.draw_tracks(frame, track_results, emb_snapshot, name_snapshot)
             try:
                 output_queue.put_nowait(annotated)
             except queue.Full:
