@@ -2,8 +2,8 @@
 RTSP_INPUT: str = "rtsp://192.168.50.48:8554/cam"
 OUTPUT_DIR: str = "output"
 
-INPUT_WIDTH: int = 640
-INPUT_HEIGHT: int = 360
+INPUT_WIDTH: int = 1280
+INPUT_HEIGHT: int = 720
 
 DETECT_INTERVAL: int = 5          # 每隔几帧触发 YOLO 检测
 BYTETRACK_MAX_AGE: int = 30       # track 消失多少帧后视为已移除
