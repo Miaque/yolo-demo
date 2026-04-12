@@ -46,7 +46,36 @@ def test_concurrent_writes_no_error():
 def test_snapshot_is_independent_copy():
     state.clear()
     state.set_embedding(1, np.ones(3, dtype=np.float32))
-    snapshot = state.snapshot()
+    emb_snap, _ = state.snapshot()
     state.set_embedding(1, np.zeros(3, dtype=np.float32))
     # snapshot 不受后续写入影响
-    np.testing.assert_array_equal(snapshot[1], np.ones(3, dtype=np.float32))
+    np.testing.assert_array_equal(emb_snap[1], np.ones(3, dtype=np.float32))
+
+
+def test_set_and_get_name():
+    state.clear()
+    state.set_name(1, "Alice")
+    assert state.get_name(1) == "Alice"
+
+
+def test_get_name_nonexistent_returns_none():
+    state.clear()
+    assert state.get_name(999) is None
+
+
+def test_remove_name():
+    state.clear()
+    state.set_name(1, "Alice")
+    state.set_embedding(1, np.zeros(3, dtype=np.float32))
+    state.remove_embedding(1)
+    assert state.get_name(1) is None
+    assert state.get_embedding(1) is None
+
+
+def test_snapshot_returns_both_stores():
+    state.clear()
+    state.set_embedding(1, np.ones(3, dtype=np.float32))
+    state.set_name(1, "Alice")
+    emb_snap, name_snap = state.snapshot()
+    assert 1 in emb_snap
+    assert name_snap[1] == "Alice"
