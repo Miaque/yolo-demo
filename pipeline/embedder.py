@@ -1,13 +1,11 @@
 # pipeline/embedder.py
 import queue
 import threading
-import logging
 import numpy as np
 from insightface.app import FaceAnalysis
+from loguru import logger
 import config
 import state
-
-logger = logging.getLogger(__name__)
 
 
 class EmbedderThread(threading.Thread):
@@ -37,4 +35,4 @@ class EmbedderThread(threading.Thread):
             if results:
                 state.set_embedding(track_id, results[0].embedding)
         except Exception:
-            logger.warning("InsightFace failed for track_id=%d", track_id, exc_info=True)
+            logger.exception("InsightFace failed for track_id={}", track_id)

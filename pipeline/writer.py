@@ -2,11 +2,9 @@
 import queue
 import subprocess
 import threading
-import logging
 import numpy as np
+from loguru import logger
 import config
-
-logger = logging.getLogger(__name__)
 
 
 def _build_write_cmd(rtsp_url: str) -> list[str]:

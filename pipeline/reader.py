@@ -3,11 +3,9 @@ import queue
 import subprocess
 import threading
 import time
-import logging
 import numpy as np
+from loguru import logger
 import config
-
-logger = logging.getLogger(__name__)
 
 _FRAME_SIZE = config.INPUT_WIDTH * config.INPUT_HEIGHT * 3  # BGR24 字节数
 
@@ -46,13 +44,13 @@ class ReaderThread(threading.Thread):
         for attempt in range(config.FFMPEG_RETRY_MAX):
             if self.stop_event.is_set():
                 return
-            logger.info("Reader: attempt %d/%d", attempt + 1, config.FFMPEG_RETRY_MAX)
+            logger.info("Reader: attempt {}/{}", attempt + 1, config.FFMPEG_RETRY_MAX)
             try:
                 self._read_loop()
             except Exception:
-                logger.error("Reader: unexpected error", exc_info=True)
+                logger.exception("Reader: unexpected error")
             if not self.stop_event.is_set():
-                logger.info("Reader: reconnecting in %ds…", config.FFMPEG_RETRY_DELAY)
+                logger.info("Reader: reconnecting in {}s…", config.FFMPEG_RETRY_DELAY)
                 time.sleep(config.FFMPEG_RETRY_DELAY)
         logger.error("Reader: max retries reached, giving up")
 
@@ -66,7 +64,7 @@ class ReaderThread(threading.Thread):
             while not self.stop_event.is_set():
                 raw = proc.stdout.read(_FRAME_SIZE)
                 if len(raw) != _FRAME_SIZE:
-                    logger.warning("Reader: stream ended or short read (%d bytes)", len(raw))
+                    logger.warning("Reader: stream ended or short read ({} bytes)", len(raw))
                     break
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                     (config.INPUT_HEIGHT, config.INPUT_WIDTH, 3)

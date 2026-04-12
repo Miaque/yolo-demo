@@ -1,9 +1,9 @@
 # main.py
-import logging
 import queue
 import signal
 import threading
 import numpy as np
+from loguru import logger
 import config
 import overlay
 import state
@@ -12,12 +12,6 @@ from pipeline.embedder import EmbedderThread
 from pipeline.reader import ReaderThread
 from pipeline.tracker import FaceTracker
 from pipeline.writer import WriterThread
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)-12s %(levelname)s %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 
 def _crop_with_margin(frame: np.ndarray, bbox: list[int]) -> np.ndarray:
@@ -50,7 +44,7 @@ def run() -> None:
     known_ids: set[int] = set()
 
     def _handle_signal(sig, _frame) -> None:
-        logger.info("Signal %d received, shutting down…", sig)
+        logger.info("Signal {} received, shutting down…", sig)
         stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
@@ -59,7 +53,7 @@ def run() -> None:
     reader.start()
     embedder.start()
     writer.start()
-    logger.info("Pipeline started. Input: %s", config.RTSP_INPUT)
+    logger.info("Pipeline started. Input: {}", config.RTSP_INPUT)
 
     frame_count = 0
     track_results: list[tuple[int, list[int]]] = []
