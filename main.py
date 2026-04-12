@@ -57,8 +57,9 @@ def _load_known_faces() -> dict[str, np.ndarray]:
             logger.warning("No face detected in: {}", img_path)
             continue
         name = img_path.stem
-        known_faces[name] = results[0].embedding
-        logger.info("Loaded known face: {}", name)
+        emb = results[0].embedding
+        known_faces[name] = emb
+        logger.info("Loaded known face: {} | emb_norm={:.4f} | emb_shape={}", name, float(np.linalg.norm(emb)), emb.shape)
 
     logger.info("Total known faces loaded: {}", len(known_faces))
     return known_faces

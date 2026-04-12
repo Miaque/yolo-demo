@@ -2,6 +2,7 @@
 import queue
 import threading
 import numpy as np
+import cv2
 from insightface.app import FaceAnalysis
 from loguru import logger
 import config
@@ -19,14 +20,17 @@ def match_name(
 
     best_name = "Unknown"
     best_sim = threshold
+    scores: dict[str, float] = {}
     for name, known_emb in known_faces.items():
         sim = float(
             np.dot(embedding, known_emb)
             / (np.linalg.norm(embedding) * np.linalg.norm(known_emb) + 1e-10)
         )
+        scores[name] = sim
         if sim > best_sim:
             best_sim = sim
             best_name = name
+    logger.info("match_name scores={} best='{}' threshold={}", scores, best_name, threshold)
     return best_name
 
 
@@ -57,13 +61,24 @@ class EmbedderThread(threading.Thread):
             except queue.Empty:
                 continue
 
+    _crop_count = 0
+
     def _process(self, track_id: int, face_crop: np.ndarray) -> None:
         try:
+            # DEBUG: 保存所有裁剪图用于排查
+            from pathlib import Path
+            debug_dir = Path("output/debug_crops")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(debug_dir / f"crop_{track_id}_{self._crop_count}.jpg"), face_crop)
+            logger.info("DEBUG saved crop: output/debug_crops/crop_{}_{}.jpg shape={}", track_id, self._crop_count, face_crop.shape)
+            self._crop_count += 1
+
             results = self._app.get(face_crop)
             if results:
                 embedding = results[0].embedding
                 state.set_embedding(track_id, embedding)
                 name = match_name(embedding, self.known_faces)
+                logger.info("track_id={} matched='{}' emb_norm={:.4f}", track_id, name, float(np.linalg.norm(embedding)))
                 state.set_name(track_id, name)
         except Exception:
             logger.exception("InsightFace failed for track_id={}", track_id)

@@ -12,3 +12,5 @@ wheels/
 *.pt
 yolov8n-face/
 output/
+faces/
+.history/
