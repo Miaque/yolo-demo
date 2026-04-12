@@ -30,3 +30,6 @@ FACE_MODEL: str = "yolov8n-face.pt"
 # InsightFace 模型名称（buffalo_sc 为轻量亚洲优化版）
 INSIGHTFACE_MODEL: str = "buffalo_sc"
 INSIGHTFACE_DET_SIZE: tuple[int, int] = (320, 320)
+
+FACES_DIR: str = "faces"
+RECOGNITION_THRESHOLD: float = 0.4
