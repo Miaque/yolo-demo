@@ -2,6 +2,8 @@
 import queue
 import signal
 import threading
+import time
+from datetime import datetime
 import numpy as np
 from loguru import logger
 import config
@@ -37,9 +39,11 @@ def run() -> None:
     detector = FaceDetector()
     tracker = FaceTracker()
 
+    output_path = f"{config.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+
     reader = ReaderThread(frame_queue, stop_event)
     embedder = EmbedderThread(face_crop_queue, stop_event)
-    writer = WriterThread(output_queue, stop_event)
+    writer = WriterThread(output_queue, stop_event, output_path=output_path)
 
     known_ids: set[int] = set()
 
@@ -53,7 +57,7 @@ def run() -> None:
     reader.start()
     embedder.start()
     writer.start()
-    logger.info("Pipeline started. Input: {}", config.RTSP_INPUT)
+    logger.info("Pipeline started. Input: {}, Output: {}", config.RTSP_INPUT, output_path)
 
     frame_count = 0
     track_results: list[tuple[int, list[int]]] = []
@@ -63,13 +67,30 @@ def run() -> None:
             try:
                 frame = frame_queue.get(timeout=1.0)
             except queue.Empty:
+                if frame_count > 0 and frame_count % 50 == 0:
+                    logger.info("Main: frame_queue empty after {} frames", frame_count)
                 continue
 
             frame_count += 1
+            if frame_count % 100 == 0:
+                logger.info(
+                    "Main: frame {} | frame_q={} crop_q={} out_q={}",
+                    frame_count, frame_queue.qsize(),
+                    face_crop_queue.qsize(), output_queue.qsize(),
+                )
 
             if frame_count % config.DETECT_INTERVAL == 0:
+                t0 = time.monotonic()
                 detections = detector.detect(frame)
+                t1 = time.monotonic()
                 track_results = tracker.update(detections, frame)
+                t2 = time.monotonic()
+                if frame_count <= 20 or frame_count % 100 == 0:
+                    logger.info(
+                        "Main: frame {} detect={:.0f}ms track={:.0f}ms dets={}",
+                        frame_count, (t1 - t0) * 1000, (t2 - t1) * 1000,
+                        len(detections),
+                    )
 
                 for removed_id in tracker.removed_ids():
                     known_ids.discard(removed_id)
@@ -91,7 +112,7 @@ def run() -> None:
             try:
                 output_queue.put_nowait(annotated)
             except queue.Full:
-                pass  # 推流线程跟不上，丢弃此帧
+                logger.warning("Main: output_queue full, dropping frame {}", frame_count)
 
     finally:
         stop_event.set()

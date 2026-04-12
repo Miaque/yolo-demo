@@ -11,3 +11,4 @@ wheels/
 .idea/
 *.pt
 yolov8n-face/
+output/

@@ -1,66 +1,94 @@
 # pipeline/writer.py
+import os
 import queue
 import subprocess
 import threading
+import time
 import numpy as np
 from loguru import logger
 import config
 
+_OUTPUT_FPS = 25
 
-def _build_write_cmd(rtsp_url: str) -> list[str]:
+
+def _build_file_cmd(output_path: str) -> list[str]:
     return [
         "ffmpeg",
+        "-y",
         "-f", "rawvideo",
         "-pix_fmt", "bgr24",
         "-s", f"{config.INPUT_WIDTH}x{config.INPUT_HEIGHT}",
-        "-r", "25",
+        "-r", str(_OUTPUT_FPS),
         "-i", "-",
         "-c:v", "libx264",
         "-preset", "ultrafast",
-        "-tune", "zerolatency",
         "-b:v", config.OUTPUT_BITRATE,
-        "-f", "rtsp",
-        "-rtsp_transport", "tcp",
-        rtsp_url,
+        output_path,
     ]
 
 
 class WriterThread(threading.Thread):
-    """FFmpeg 推流线程，将 output_queue 中的标注帧编码后推送至 RTSP。"""
+    """FFmpeg 写文件线程，按固定 FPS 写帧。无新帧时重复上一帧以保持时长正确。"""
 
     def __init__(
         self,
         output_queue: queue.Queue,
         stop_event: threading.Event,
-        rtsp_url: str = config.RTSP_OUTPUT,
+        output_path: str,
     ) -> None:
         super().__init__(daemon=True, name="writer")
         self.output_queue = output_queue
         self.stop_event = stop_event
-        self.rtsp_url = rtsp_url
+        self.output_path = output_path
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     def run(self) -> None:
         proc = subprocess.Popen(
-            _build_write_cmd(self.rtsp_url),
+            _build_file_cmd(self.output_path),
             stdin=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+        interval = 1.0 / _OUTPUT_FPS
+        current_frame: np.ndarray | None = None
+        next_time = time.monotonic()
+        write_count = 0
+
         try:
             while not self.stop_event.is_set():
+                # 排空队列，只保留最新帧
+                got_new = False
                 try:
-                    frame: np.ndarray = self.output_queue.get(timeout=0.5)
+                    while True:
+                        current_frame = self.output_queue.get_nowait()
+                        got_new = True
                 except queue.Empty:
-                    continue
-                try:
-                    proc.stdin.write(frame.tobytes())
-                    proc.stdin.flush()
-                except BrokenPipeError:
-                    logger.error("Writer: broken pipe, RTSP server may have stopped")
-                    break
+                    pass
+
+                if current_frame is not None:
+                    try:
+                        proc.stdin.write(current_frame.tobytes())
+                        proc.stdin.flush()
+                        write_count += 1
+                        if write_count % 100 == 0 or got_new:
+                            logger.info(
+                                "Writer: wrote {} frames (new={}, qsize={})",
+                                write_count, got_new, self.output_queue.qsize(),
+                            )
+                    except BrokenPipeError:
+                        logger.error("Writer: broken pipe")
+                        break
+                else:
+                    if write_count == 0:
+                        logger.debug("Writer: waiting for first frame…")
+
+                next_time += interval
+                sleep_time = next_time - time.monotonic()
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
         finally:
             try:
                 proc.stdin.close()
             except Exception:
                 pass
             proc.wait()
-            logger.info("Writer: stopped")
+            logger.info("Writer: saved to {}", self.output_path)
