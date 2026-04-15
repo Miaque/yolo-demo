@@ -72,16 +72,28 @@ def _annotate_face(frame: np.ndarray, face: FaceFeatureData) -> np.ndarray:
         px, py = xs[i], ys[i]
         cv2.circle(out, (px, py), 4, (0, 0, 255), -1)
         cv2.putText(
-            out, name, (px + 4, py - 4),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1, cv2.LINE_AA,
+            out,
+            name,
+            (px + 4, py - 4),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            (0, 0, 255),
+            1,
+            cv2.LINE_AA,
         )
 
     # 属性标签
     sex_text = "M" if face.sex == 1 else "F"
     label = f"sex={sex_text} age={face.age} prob={pos.probability:.2f}"
     cv2.putText(
-        out, label, (pos.x1, max(pos.y1 - 8, 14)),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA,
+        out,
+        label,
+        (pos.x1, max(pos.y1 - 8, 14)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 255, 0),
+        1,
+        cv2.LINE_AA,
     )
     return out
 

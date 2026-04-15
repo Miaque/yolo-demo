@@ -1,0 +1,2 @@
+When generating git commit messages, always output Chinese.
+Follow Conventional Commit format.
