@@ -55,12 +55,11 @@ class WriterThread(threading.Thread):
 
         try:
             while not self.stop_event.is_set():
-                # 排空队列，只保留最新帧
+                # 逐帧消费：每次只取一帧，保留中间帧不丢弃
                 got_new = False
                 try:
-                    while True:
-                        current_frame = self.output_queue.get_nowait()
-                        got_new = True
+                    current_frame = self.output_queue.get(timeout=0.2)
+                    got_new = True
                 except queue.Empty:
                     pass
 

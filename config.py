@@ -50,7 +50,7 @@ class QueueSettings(BaseSettings):
 
     FRAME_QUEUE_SIZE: int = 2
     FACE_CROP_QUEUE_SIZE: int = 4
-    OUTPUT_QUEUE_SIZE: int = 2
+    OUTPUT_QUEUE_SIZE: int = 8
 
 
 class NetworkSettings(BaseSettings):

@@ -8,7 +8,9 @@
       "Bash(uv add:*)",
       "Bash(python:*)",
       "Bash(uv --version)",
-      "Bash(pip --version)"
+      "Bash(pip --version)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)"
     ]
   }
 }
