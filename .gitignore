@@ -9,8 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .idea/
-*.pt
-yolov8n-face/
+models/
 output/
 faces/
 .history/

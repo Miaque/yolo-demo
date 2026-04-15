@@ -16,9 +16,13 @@ class InputSettings(BaseSettings):
 class DetectionSettings(BaseSettings):
     """YOLO 检测相关配置"""
 
+    # YOLO 模型路径
+    # yolo11n.pt 会由 ultralytics 自动下载
+    # yolov8n-face.pt 需手动下载：
+    # https://github.com/akanametov/yolo-face/releases
     DETECT_INTERVAL: int = 5  # 每隔几帧触发 YOLO 检测
-    PERSON_MODEL: str = "yolo11n.pt"
-    FACE_MODEL: str = "yolov8n-face.pt"
+    PERSON_MODEL: str = "models/yolo11s.pt"
+    FACE_MODEL: str = "models/yolov11s-face.pt"
 
 
 class TrackingSettings(BaseSettings):

@@ -1,6 +1,7 @@
 # pipeline/detector.py
-from ultralytics import YOLO
 import numpy as np
+from ultralytics.models.yolo import YOLO
+
 from config import settings
 
 
@@ -22,7 +23,7 @@ class FaceDetector:
 
         for box in person_results.boxes:
             px1, py1, px2, py2 = [int(v) for v in box.xyxy[0]]
-            upper_y2 = py1 + (py2 - py1) // 2
+            upper_y2 = py1 + (py2 - py1) * 2 // 3
 
             if upper_y2 - py1 < settings.FACE_MIN_HEIGHT:
                 continue

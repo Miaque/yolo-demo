@@ -9,11 +9,12 @@ import cv2
 import numpy as np
 import pytest
 
+from pipeline.debug import draw_face_features
 from pipeline.face_api import FaceApiClient
 from schemas.face_feature import FaceFeatureData
 
 FACES_DIR = Path(__file__).resolve().parent.parent / "faces"
-TEST_IMAGE = FACES_DIR / "zhanjh.jpg"
+TEST_IMAGE = FACES_DIR / "35fd8561b499fe326d720853003b2aa9.jpg"
 
 
 def _read_image_as_base64(path: Path) -> str:
@@ -56,48 +57,6 @@ async def test_get_face_feature_success(client: FaceApiClient, img_b64: str) -> 
     assert len(pos.points) == 10
 
 
-def _annotate_face(frame: np.ndarray, face: FaceFeatureData) -> np.ndarray:
-    """在图片上绘制人脸框、关键点和属性标签。"""
-    out = frame.copy()
-    pos = face.face_pos
-
-    # 人脸框（绿色）
-    cv2.rectangle(out, (pos.x1, pos.y1), (pos.x2, pos.y2), (0, 255, 0), 2)
-
-    # 5 个关键点（红色圆点）
-    # points 格式：前 5 个为 X 坐标，后 5 个为 Y 坐标
-    _LANDMARK_NAMES = ["L-eye", "R-eye", "Nose", "L-mouth", "R-mouth"]
-    xs, ys = pos.points[:5], pos.points[5:]
-    for i, name in enumerate(_LANDMARK_NAMES):
-        px, py = xs[i], ys[i]
-        cv2.circle(out, (px, py), 4, (0, 0, 255), -1)
-        cv2.putText(
-            out,
-            name,
-            (px + 4, py - 4),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            (0, 0, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-    # 属性标签
-    sex_text = "M" if face.sex == 1 else "F"
-    label = f"sex={sex_text} age={face.age} prob={pos.probability:.2f}"
-    cv2.putText(
-        out,
-        label,
-        (pos.x1, max(pos.y1 - 8, 14)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (0, 255, 0),
-        1,
-        cv2.LINE_AA,
-    )
-    return out
-
-
 async def test_annotate_face_image(client: FaceApiClient, img_b64: str) -> None:
     """调用真实接口，在原图上绘制人脸框和关键点，保存标注图片。"""
     resp = await client.get_face_feature(img_b64)
@@ -111,9 +70,7 @@ async def test_annotate_face_image(client: FaceApiClient, img_b64: str) -> None:
     assert frame is not None
 
     # 标注所有人脸
-    annotated = frame
-    for face in resp.data[0]:
-        annotated = _annotate_face(annotated, face)
+    annotated = draw_face_features(frame, resp.data[0])
 
     # 保存
     output_dir = Path(__file__).resolve().parent.parent / "output"
