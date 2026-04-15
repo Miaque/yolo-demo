@@ -1,7 +1,7 @@
 # pipeline/tracker.py
 from boxmot import ByteTrack
 import numpy as np
-import config
+from config import settings
 
 
 class FaceTracker:
@@ -11,7 +11,7 @@ class FaceTracker:
         self._tracker = ByteTrack(
             track_thresh=0.5,
             match_thresh=0.8,
-            track_buffer=config.BYTETRACK_MAX_AGE,
+            track_buffer=settings.BYTETRACK_MAX_AGE,
         )
         self._last_tracks: list[tuple[int, list[int]]] = []
         self._active_ids: set[int] = set()

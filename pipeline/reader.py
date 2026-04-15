@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 from loguru import logger
-import config
+from config import settings
 
 
 class ReaderThread(threading.Thread):
@@ -16,7 +16,7 @@ class ReaderThread(threading.Thread):
         self,
         frame_queue: queue.Queue,
         stop_event: threading.Event,
-        rtsp_url: str = config.RTSP_INPUT,
+        rtsp_url: str = settings.RTSP_INPUT,
     ) -> None:
         super().__init__(daemon=True, name="reader")
         self.frame_queue = frame_queue
@@ -24,17 +24,17 @@ class ReaderThread(threading.Thread):
         self.rtsp_url = rtsp_url
 
     def run(self) -> None:
-        for attempt in range(config.FFMPEG_RETRY_MAX):
+        for attempt in range(settings.FFMPEG_RETRY_MAX):
             if self.stop_event.is_set():
                 return
-            logger.info("Reader: attempt {}/{}", attempt + 1, config.FFMPEG_RETRY_MAX)
+            logger.info("Reader: attempt {}/{}", attempt + 1, settings.FFMPEG_RETRY_MAX)
             try:
                 self._read_loop()
             except Exception:
                 logger.exception("Reader: unexpected error")
             if not self.stop_event.is_set():
-                logger.info("Reader: reconnecting in {}s…", config.FFMPEG_RETRY_DELAY)
-                time.sleep(config.FFMPEG_RETRY_DELAY)
+                logger.info("Reader: reconnecting in {}s…", settings.FFMPEG_RETRY_DELAY)
+                time.sleep(settings.FFMPEG_RETRY_DELAY)
         logger.error("Reader: max retries reached, giving up")
 
     def _read_loop(self) -> None:
@@ -52,7 +52,7 @@ class ReaderThread(threading.Thread):
                     logger.warning("Reader: read failed after {} frames", read_count)
                     break
                 read_count += 1
-                frame = cv2.resize(frame, (config.INPUT_WIDTH, config.INPUT_HEIGHT))
+                frame = cv2.resize(frame, (settings.INPUT_WIDTH, settings.INPUT_HEIGHT))
                 # 满时弹出最旧帧再放新帧
                 if self.frame_queue.full():
                     try:

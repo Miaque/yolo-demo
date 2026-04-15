@@ -6,7 +6,7 @@ import threading
 import time
 import numpy as np
 from loguru import logger
-import config
+from config import settings
 
 _OUTPUT_FPS = 25
 
@@ -17,12 +17,12 @@ def _build_file_cmd(output_path: str) -> list[str]:
         "-y",
         "-f", "rawvideo",
         "-pix_fmt", "bgr24",
-        "-s", f"{config.INPUT_WIDTH}x{config.INPUT_HEIGHT}",
+        "-s", f"{settings.INPUT_WIDTH}x{settings.INPUT_HEIGHT}",
         "-r", str(_OUTPUT_FPS),
         "-i", "-",
         "-c:v", "libx264",
         "-preset", "ultrafast",
-        "-b:v", config.OUTPUT_BITRATE,
+        "-b:v", settings.OUTPUT_BITRATE,
         output_path,
     ]
 

@@ -8,11 +8,11 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 import state
 import overlay
-import config
+from config import settings
 
 
 def _make_frame() -> np.ndarray:
-    return np.zeros((config.INPUT_HEIGHT, config.INPUT_WIDTH, 3), dtype=np.uint8)
+    return np.zeros((settings.INPUT_HEIGHT, settings.INPUT_WIDTH, 3), dtype=np.uint8)
 
 
 @patch("pipeline.tracker.ByteTrack")
@@ -36,7 +36,7 @@ def test_pipeline_loop_processes_frames(mock_yolo_cls, mock_bt_cls):
 
     state.clear()
     frame_queue: queue.Queue = queue.Queue(maxsize=10)
-    face_crop_queue: queue.Queue = queue.Queue(maxsize=config.FACE_CROP_QUEUE_SIZE)
+    face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
     output_queue: queue.Queue = queue.Queue(maxsize=10)
     stop_event = threading.Event()
 
@@ -56,7 +56,7 @@ def test_pipeline_loop_processes_frames(mock_yolo_cls, mock_bt_cls):
         frame = frame_queue.get_nowait()
         frame_count += 1
 
-        if frame_count % config.DETECT_INTERVAL == 0:
+        if frame_count % settings.DETECT_INTERVAL == 0:
             detections = detector.detect(frame)
             track_results = tracker.update(detections, frame)
         else:
@@ -70,7 +70,7 @@ def test_pipeline_loop_processes_frames(mock_yolo_cls, mock_bt_cls):
     # 所有输出帧形状正确
     while not output_queue.empty():
         f = output_queue.get_nowait()
-        assert f.shape == (config.INPUT_HEIGHT, config.INPUT_WIDTH, 3)
+        assert f.shape == (settings.INPUT_HEIGHT, settings.INPUT_WIDTH, 3)
 
 
 @patch("pipeline.tracker.ByteTrack")
@@ -94,7 +94,7 @@ def test_new_track_id_queued_for_embedding(mock_yolo_cls, mock_bt_cls):
     mock_bt_cls.return_value = mock_bt
 
     state.clear()
-    face_crop_queue: queue.Queue = queue.Queue(maxsize=config.FACE_CROP_QUEUE_SIZE)
+    face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
 
     detector = FaceDetector()
     tracker = FaceTracker()

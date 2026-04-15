@@ -5,14 +5,14 @@ import numpy as np
 import cv2
 from insightface.app import FaceAnalysis
 from loguru import logger
-import config
+from config import settings
 import state
 
 
 def match_name(
     embedding: np.ndarray,
     known_faces: dict[str, np.ndarray],
-    threshold: float = config.RECOGNITION_THRESHOLD,
+    threshold: float = settings.RECOGNITION_THRESHOLD,
 ) -> str:
     """将 embedding 与已知人脸比较，返回最匹配的名字或 'Unknown'。"""
     if not known_faces:
@@ -48,10 +48,10 @@ class EmbedderThread(threading.Thread):
         self.stop_event = stop_event
         self.known_faces = known_faces or {}
         self._app = FaceAnalysis(
-            name=config.INSIGHTFACE_MODEL,
+            name=settings.INSIGHTFACE_MODEL,
             providers=["CPUExecutionProvider"],
         )
-        self._app.prepare(ctx_id=0, det_size=config.INSIGHTFACE_DET_SIZE)
+        self._app.prepare(ctx_id=0, det_size=settings.INSIGHTFACE_DET_SIZE)
 
     def run(self) -> None:
         while not self.stop_event.is_set():

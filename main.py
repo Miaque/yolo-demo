@@ -7,7 +7,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 from loguru import logger
-import config
+from config import settings
 import overlay
 import state
 from pipeline.detector import FaceDetector
@@ -22,7 +22,7 @@ def _crop_with_margin(frame: np.ndarray, bbox: list[int]) -> np.ndarray:
     x1, y1, x2, y2 = bbox
     h, w = frame.shape[:2]
     bw, bh = x2 - x1, y2 - y1
-    mx, my = int(bw * config.FACE_CROP_MARGIN), int(bh * config.FACE_CROP_MARGIN)
+    mx, my = int(bw * settings.FACE_CROP_MARGIN), int(bh * settings.FACE_CROP_MARGIN)
     cx1 = max(0, x1 - mx)
     cy1 = max(0, y1 - my)
     cx2 = min(w, x2 + mx)
@@ -36,13 +36,13 @@ def _load_known_faces() -> dict[str, np.ndarray]:
 
     from insightface.app import FaceAnalysis
 
-    faces_dir = Path(config.FACES_DIR)
+    faces_dir = Path(settings.FACES_DIR)
     if not faces_dir.is_dir():
-        logger.warning("Faces directory '{}' not found, all faces will be Unknown", config.FACES_DIR)
+        logger.warning("Faces directory '{}' not found, all faces will be Unknown", settings.FACES_DIR)
         return {}
 
-    app = FaceAnalysis(name=config.INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
-    app.prepare(ctx_id=0, det_size=config.INSIGHTFACE_DET_SIZE)
+    app = FaceAnalysis(name=settings.INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
+    app.prepare(ctx_id=0, det_size=settings.INSIGHTFACE_DET_SIZE)
 
     known_faces: dict[str, np.ndarray] = {}
     for img_path in sorted(faces_dir.iterdir()):
@@ -68,16 +68,16 @@ def _load_known_faces() -> dict[str, np.ndarray]:
 def run() -> None:
     stop_event = threading.Event()
 
-    frame_queue: queue.Queue = queue.Queue(maxsize=config.FRAME_QUEUE_SIZE)
-    face_crop_queue: queue.Queue = queue.Queue(maxsize=config.FACE_CROP_QUEUE_SIZE)
-    output_queue: queue.Queue = queue.Queue(maxsize=config.OUTPUT_QUEUE_SIZE)
+    frame_queue: queue.Queue = queue.Queue(maxsize=settings.FRAME_QUEUE_SIZE)
+    face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
+    output_queue: queue.Queue = queue.Queue(maxsize=settings.OUTPUT_QUEUE_SIZE)
 
     detector = FaceDetector()
     tracker = FaceTracker()
 
     known_faces = _load_known_faces()
 
-    output_path = f"{config.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    output_path = f"{settings.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
 
     reader = ReaderThread(frame_queue, stop_event)
     embedder = EmbedderThread(face_crop_queue, stop_event, known_faces=known_faces)
@@ -95,7 +95,7 @@ def run() -> None:
     reader.start()
     embedder.start()
     writer.start()
-    logger.info("Pipeline started. Input: {}, Output: {}", config.RTSP_INPUT, output_path)
+    logger.info("Pipeline started. Input: {}, Output: {}", settings.RTSP_INPUT, output_path)
 
     frame_count = 0
     track_results: list[tuple[int, list[int]]] = []
@@ -117,7 +117,7 @@ def run() -> None:
                     face_crop_queue.qsize(), output_queue.qsize(),
                 )
 
-            if frame_count % config.DETECT_INTERVAL == 0:
+            if frame_count % settings.DETECT_INTERVAL == 0:
                 t0 = time.monotonic()
                 detections = detector.detect(frame)
                 t1 = time.monotonic()

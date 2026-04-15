@@ -1,7 +1,7 @@
 # pipeline/detector.py
 from ultralytics import YOLO
 import numpy as np
-import config
+from config import settings
 
 
 class FaceDetector:
@@ -9,8 +9,8 @@ class FaceDetector:
 
     def __init__(
         self,
-        person_model_path: str = config.PERSON_MODEL,
-        face_model_path: str = config.FACE_MODEL,
+        person_model_path: str = settings.PERSON_MODEL,
+        face_model_path: str = settings.FACE_MODEL,
     ) -> None:
         self.person_model = YOLO(person_model_path)
         self.face_model = YOLO(face_model_path)
@@ -24,7 +24,7 @@ class FaceDetector:
             px1, py1, px2, py2 = [int(v) for v in box.xyxy[0]]
             upper_y2 = py1 + (py2 - py1) // 2
 
-            if upper_y2 - py1 < config.FACE_MIN_HEIGHT:
+            if upper_y2 - py1 < settings.FACE_MIN_HEIGHT:
                 continue
 
             crop = frame[py1:upper_y2, px1:px2]

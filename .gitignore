@@ -14,3 +14,4 @@ yolov8n-face/
 output/
 faces/
 .history/
+.env
