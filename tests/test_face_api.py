@@ -1,7 +1,6 @@
 # tests/test_face_api.py
 """FaceApiClient 集成测试 — 调用真实接口。"""
 
-import asyncio
 import base64
 from pathlib import Path
 
@@ -23,8 +22,8 @@ def _read_image_as_base64(path: Path) -> str:
 
 
 @pytest.fixture()
-async def client() -> FaceApiClient:
-    async with FaceApiClient() as c:
+def client() -> FaceApiClient:
+    with FaceApiClient() as c:
         yield c
 
 
@@ -33,9 +32,9 @@ def img_b64() -> str:
     return _read_image_as_base64(TEST_IMAGE)
 
 
-async def test_get_face_feature_success(client: FaceApiClient, img_b64: str) -> None:
+def test_get_face_feature_success(client: FaceApiClient, img_b64: str) -> None:
     """调用真实接口，验证返回结构完整且包含人脸。"""
-    resp = await client.get_face_feature(img_b64)
+    resp = client.get_face_feature(img_b64)
 
     assert resp.status_code == 200
     assert resp.detail == "success"
@@ -57,9 +56,9 @@ async def test_get_face_feature_success(client: FaceApiClient, img_b64: str) -> 
     assert len(pos.points) == 10
 
 
-async def test_annotate_face_image(client: FaceApiClient, img_b64: str) -> None:
+def test_annotate_face_image(client: FaceApiClient, img_b64: str) -> None:
     """调用真实接口，在原图上绘制人脸框和关键点，保存标注图片。"""
-    resp = await client.get_face_feature(img_b64)
+    resp = client.get_face_feature(img_b64)
     assert resp.status_code == 200
     assert len(resp.data) > 0 and len(resp.data[0]) >= 1
 

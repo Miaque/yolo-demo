@@ -16,6 +16,9 @@ class InputSettings(BaseSettings):
 class DetectionSettings(BaseSettings):
     """YOLO 检测相关配置"""
 
+    # 检测后端："model" 使用本地 YOLO 两阶段模型，"api" 使用人脸特征提取 HTTP 接口
+    DETECTOR_BACKEND: str = "model"
+
     # YOLO 模型路径
     # yolo11n.pt 会由 ultralytics 自动下载
     # yolov8n-face.pt 需手动下载：

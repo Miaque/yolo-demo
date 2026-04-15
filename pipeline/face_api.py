@@ -1,7 +1,7 @@
 # pipeline/face_api.py
 """人脸特征提取 API 客户端。"""
 
-import httpx
+import requests
 from loguru import logger
 
 from config import settings
@@ -9,7 +9,7 @@ from schemas.face_feature import FaceFeatureRequest, FaceFeatureResponse
 
 
 class FaceApiClient:
-    """封装人脸特征提取 HTTP 接口的客户端（异步）。"""
+    """封装人脸特征提取 HTTP 接口的客户端（同步）。"""
 
     def __init__(
         self,
@@ -18,17 +18,9 @@ class FaceApiClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client: httpx.AsyncClient | None = None
+        self._session = requests.Session()
 
-    def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                timeout=self._timeout,
-            )
-        return self._client
-
-    async def get_face_feature(self, img_base64: str) -> FaceFeatureResponse:
+    def get_face_feature(self, img_base64: str) -> FaceFeatureResponse:
         """调用 getFaceFeature 接口，传入图片 Base64，返回人脸特征结果。
 
         Args:
@@ -38,16 +30,16 @@ class FaceApiClient:
             FaceFeatureResponse: 解析后的响应数据。
 
         Raises:
-            httpx.HTTPStatusError: 当 HTTP 状态码非 2xx 时抛出。
+            requests.HTTPError: 当 HTTP 状态码非 2xx 时抛出。
         """
-        client = self._get_client()
         request_body = FaceFeatureRequest(imgBase64=img_base64)
 
         logger.info("FaceApiClient: POST /face/getFaceFeature")
 
-        resp = await client.post(
-            "/face/getFaceFeature",
+        resp = self._session.post(
+            f"{self._base_url}/face/getFaceFeature",
             json=request_body.model_dump(by_alias=True),
+            timeout=self._timeout,
         )
         resp.raise_for_status()
 
@@ -60,14 +52,12 @@ class FaceApiClient:
         )
         return response
 
-    async def close(self) -> None:
-        """关闭底层 HTTP 连接。"""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+    def close(self) -> None:
+        """关闭底层 HTTP Session。"""
+        self._session.close()
 
-    async def __aenter__(self) -> "FaceApiClient":
+    def __enter__(self) -> "FaceApiClient":
         return self
 
-    async def __aexit__(self, *_args) -> None:
-        await self.close()
+    def __exit__(self, *_args) -> None:
+        self.close()
