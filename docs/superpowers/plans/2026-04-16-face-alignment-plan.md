@@ -66,6 +66,10 @@ git commit -m "feat: add ALIGNMENT_BACKEND config to FaceSettings"
 
 - [ ] **Step 1: Write failing tests for InsightFace backend**
 
+> **Note on mock targets**: `FaceAnalysis` and `FaceApiClient` are imported locally inside `FaceAligner.__init__`, so they are not module-level attributes of `pipeline.aligner`. Mock at the source: `insightface.app.FaceAnalysis` and `pipeline.face_api.FaceApiClient`.
+
+> **Note on `points` format**: The `FacePosition.points` field has an ambiguous layout. The schema says interleaved `[lx, ly, rx, ry, ...]` but `debug.py` uses split `[x0..x4, y0..y4]`. The plan uses the split format (matching `debug.py`). Verify against the live API at first integration.
+
 Create `tests/test_aligner.py`:
 
 ```python
@@ -83,7 +87,7 @@ from pipeline.aligner import AlignmentResult, FaceAligner, ARCFACE_REF_POINTS
 class TestInsightFaceBackend:
     """InsightFace 后端测试。"""
 
-    @patch("pipeline.aligner.FaceAnalysis")
+    @patch("insightface.app.FaceAnalysis")
     def test_align_returns_result_on_valid_crop(self, mock_fa_cls):
         """InsightFace 返回有效 Face → 得到 AlignmentResult。"""
         mock_app = MagicMock()
@@ -103,7 +107,7 @@ class TestInsightFaceBackend:
         assert result.landmarks.shape == (5, 2)
         aligner.close()
 
-    @patch("pipeline.aligner.FaceAnalysis")
+    @patch("insightface.app.FaceAnalysis")
     def test_align_returns_none_on_no_face(self, mock_fa_cls):
         """InsightFace 无检测结果 → 返回 None。"""
         mock_app = MagicMock()
@@ -117,7 +121,7 @@ class TestInsightFaceBackend:
         assert result is None
         aligner.close()
 
-    @patch("pipeline.aligner.FaceAnalysis")
+    @patch("insightface.app.FaceAnalysis")
     def test_aligned_face_size(self, mock_fa_cls):
         """对齐图尺寸为 112x112x3。"""
         mock_app = MagicMock()
@@ -138,7 +142,7 @@ class TestInsightFaceBackend:
 class TestApiBackend:
     """API 后端测试。"""
 
-    @patch("pipeline.aligner.FaceApiClient")
+    @patch("pipeline.face_api.FaceApiClient")
     def test_align_api_backend(self, mock_client_cls):
         """API 返回关键点和 feature → 正确解析。"""
         # 构造模拟关键点 [x0..x4, y0..y4]
@@ -168,7 +172,7 @@ class TestApiBackend:
         assert result.embedding.shape == (512,)
         aligner.close()
 
-    @patch("pipeline.aligner.FaceApiClient")
+    @patch("pipeline.face_api.FaceApiClient")
     def test_align_api_backend_no_landmarks(self, mock_client_cls):
         """API 返回空关键点 → 返回 None。"""
         mock_resp = MagicMock()
@@ -199,16 +203,52 @@ class TestGeneral:
 
     def test_close_releases_resources_insightface(self):
         """InsightFace 后端 close() 不报错。"""
-        with patch("pipeline.aligner.FaceAnalysis"):
+        with patch("insightface.app.FaceAnalysis"):
             aligner = FaceAligner(backend="insightface")
             aligner.close()  # 不应抛出异常
 
     def test_close_releases_resources_api(self):
         """API 后端 close() 调用 FaceApiClient.close()。"""
-        with patch("pipeline.aligner.FaceApiClient") as mock_cls:
+        with patch("pipeline.face_api.FaceApiClient") as mock_cls:
             aligner = FaceAligner(backend="api")
             aligner.close()
             mock_cls.return_value.close.assert_called_once()
+
+    @patch("insightface.app.FaceAnalysis")
+    def test_default_backend_from_config(self, mock_fa_cls):
+        """不传 backend 参数时使用配置默认值。"""
+        mock_app = MagicMock()
+        mock_fa_cls.return_value = mock_app
+
+        aligner = FaceAligner()  # 默认从 settings 读
+        assert aligner._backend == settings.ALIGNMENT_BACKEND
+        aligner.close()
+
+    @patch("insightface.app.FaceAnalysis")
+    def test_affine_transform_identity(self, mock_fa_cls):
+        """输入关键点等于参考点时，仿射变换接近单位变换。"""
+        mock_app = MagicMock()
+        mock_face = MagicMock()
+        mock_face.kps = ARCFACE_REF_POINTS.copy()
+        mock_face.embedding = np.ones(512, dtype=np.float32)
+        mock_app.get.return_value = [mock_face]
+        mock_fa_cls.return_value = mock_app
+
+        # 创建包含参考点位置的 112x112 图像
+        crop = np.zeros((112, 112, 3), dtype=np.uint8)
+        for pt in ARCFACE_REF_POINTS:
+            x, y = int(pt[0]), int(pt[1])
+            cv2.circle(crop, (x, y), 3, (255, 255, 255), -1)
+
+        aligner = FaceAligner(backend="insightface")
+        result = aligner.align(crop)
+
+        # 参考点处画了白点，对齐后这些白点应仍在相同位置附近
+        assert result.aligned_face.shape == (112, 112, 3)
+        for pt in ARCFACE_REF_POINTS:
+            x, y = int(pt[0]), int(pt[1])
+            assert result.aligned_face[y, x, 0] > 200  # 白点应可见
+        aligner.close()
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -408,7 +448,9 @@ git commit -m "feat: add FaceAligner with InsightFace and API backends"
 
 - [ ] **Step 1: Write failing tests for refactored EmbedderThread**
 
-Update `tests/test_embedder.py`. The tests currently patch `pipeline.embedder.FaceAnalysis`. After refactoring, they need to patch `pipeline.embedder.FaceAligner` instead:
+> **Prerequisite**: Task 2 must be complete (pipeline/aligner.py exists) before writing these tests, because `_make_mock_aligner` imports from `pipeline.aligner`.
+
+Update `tests/test_embedder.py`. The tests currently patch `pipeline.embedder.FaceAnalysis`. After refactoring, they need to patch `pipeline.embedder.FaceAligner` instead. This is a full file replacement:
 
 ```python
 import queue
@@ -761,8 +803,10 @@ def run() -> None:
 
     # 创建 FaceAligner 并用于加载已知人脸，确保 embedding 空间一致
     known_face_aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
-    known_faces = _load_known_faces(known_face_aligner)
-    known_face_aligner.close()
+    try:
+        known_faces = _load_known_faces(known_face_aligner)
+    finally:
+        known_face_aligner.close()
 
     output_path = f"{settings.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
 
