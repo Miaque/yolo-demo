@@ -43,6 +43,7 @@ class FaceSettings(BaseSettings):
     INSIGHTFACE_DET_SIZE: tuple[int, int] = (320, 320)
     FACES_DIR: str = "faces"
     RECOGNITION_THRESHOLD: float = 0.4
+    ALIGNMENT_BACKEND: str = "insightface"  # "insightface" | "api"
 
 
 class QueueSettings(BaseSettings):
