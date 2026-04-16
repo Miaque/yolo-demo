@@ -184,6 +184,17 @@ class EmbedderThread(threading.Thread):
         self._aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
         self._align_count = 0
 
+    def run(self) -> None:
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    track_id, face_crop = self.face_crop_queue.get(timeout=0.5)
+                    self._process(track_id, face_crop)
+                except queue.Empty:
+                    continue
+        finally:
+            self._aligner.close()
+
     def _process(self, track_id: int, face_crop: np.ndarray) -> None:
         try:
             result = self._aligner.align(face_crop)
