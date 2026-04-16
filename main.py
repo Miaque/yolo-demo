@@ -15,6 +15,7 @@ from pipeline.embedder import EmbedderThread
 from pipeline.reader import ReaderThread
 from pipeline.tracker import FaceTracker
 from pipeline.writer import WriterThread
+from pipeline.aligner import FaceAligner
 
 
 def _crop_with_margin(frame: np.ndarray, bbox: list[int]) -> np.ndarray:
@@ -30,19 +31,14 @@ def _crop_with_margin(frame: np.ndarray, bbox: list[int]) -> np.ndarray:
     return frame[cy1:cy2, cx1:cx2].copy()
 
 
-def _load_known_faces() -> dict[str, np.ndarray]:
-    """启动时从 faces/ 目录加载已知人脸 embedding。"""
+def _load_known_faces(aligner: FaceAligner) -> dict[str, np.ndarray]:
+    """启动时从 faces/ 目录加载已知人脸 embedding，使用与管线相同的 FaceAligner。"""
     from pathlib import Path
-
-    from insightface.app import FaceAnalysis
 
     faces_dir = Path(settings.FACES_DIR)
     if not faces_dir.is_dir():
         logger.warning("Faces directory '{}' not found, all faces will be Unknown", settings.FACES_DIR)
         return {}
-
-    app = FaceAnalysis(name=settings.INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
-    app.prepare(ctx_id=0, det_size=settings.INSIGHTFACE_DET_SIZE)
 
     known_faces: dict[str, np.ndarray] = {}
     for img_path in sorted(faces_dir.iterdir()):
@@ -52,14 +48,20 @@ def _load_known_faces() -> dict[str, np.ndarray]:
         if img is None:
             logger.warning("Cannot read image: {}", img_path)
             continue
-        results = app.get(img)
-        if not results:
+
+        result = aligner.align(img)
+        if result is None:
             logger.warning("No face detected in: {}", img_path)
             continue
+
         name = img_path.stem
-        emb = results[0].embedding
-        known_faces[name] = emb
-        logger.info("Loaded known face: {} | emb_norm={:.4f} | emb_shape={}", name, float(np.linalg.norm(emb)), emb.shape)
+        known_faces[name] = result.embedding
+        logger.info(
+            "Loaded known face: {} | emb_norm={:.4f} | emb_shape={}",
+            name,
+            float(np.linalg.norm(result.embedding)),
+            result.embedding.shape,
+        )
 
     logger.info("Total known faces loaded: {}", len(known_faces))
     return known_faces
@@ -75,7 +77,12 @@ def run() -> None:
     detector = FaceDetector()
     tracker = FaceTracker()
 
-    known_faces = _load_known_faces()
+    # 创建 FaceAligner 并用于加载已知人脸，确保 embedding 空间一致
+    known_face_aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
+    try:
+        known_faces = _load_known_faces(known_face_aligner)
+    finally:
+        known_face_aligner.close()
 
     output_path = f"{settings.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
 
