@@ -6,17 +6,31 @@ from unittest.mock import MagicMock, patch
 import state
 
 
-@patch("pipeline.embedder.FaceAnalysis")
-def test_embedding_stored_on_success(mock_fa_cls):
+def _make_mock_aligner(embedding: np.ndarray | None = None, aligned_face: np.ndarray | None = None):
+    """创建模拟 FaceAligner，返回给定的 embedding。"""
+    from pipeline.aligner import AlignmentResult, ARCFACE_REF_POINTS
+
+    aligner = MagicMock()
+    if embedding is not None:
+        result = AlignmentResult(
+            aligned_face=aligned_face if aligned_face is not None else np.zeros((112, 112, 3), dtype=np.uint8),
+            embedding=embedding,
+            landmarks=ARCFACE_REF_POINTS.copy(),
+        )
+        aligner.align.return_value = result
+    else:
+        aligner.align.return_value = None
+    return aligner
+
+
+@patch("pipeline.embedder.FaceAligner")
+def test_embedding_stored_on_success(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
     state.clear()
 
-    mock_app = MagicMock()
-    mock_face = MagicMock()
-    mock_face.embedding = np.ones(512, dtype=np.float32)
-    mock_app.get.return_value = [mock_face]
-    mock_fa_cls.return_value = mock_app
+    mock_aligner = _make_mock_aligner(embedding=np.ones(512, dtype=np.float32))
+    mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
@@ -34,15 +48,14 @@ def test_embedding_stored_on_success(mock_fa_cls):
     np.testing.assert_array_equal(result, np.ones(512, dtype=np.float32))
 
 
-@patch("pipeline.embedder.FaceAnalysis")
-def test_empty_result_not_stored(mock_fa_cls):
+@patch("pipeline.embedder.FaceAligner")
+def test_empty_result_not_stored(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
     state.clear()
 
-    mock_app = MagicMock()
-    mock_app.get.return_value = []
-    mock_fa_cls.return_value = mock_app
+    mock_aligner = _make_mock_aligner(embedding=None)
+    mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
@@ -58,15 +71,15 @@ def test_empty_result_not_stored(mock_fa_cls):
     assert state.get_embedding(99) is None
 
 
-@patch("pipeline.embedder.FaceAnalysis")
-def test_exception_in_get_does_not_crash_thread(mock_fa_cls):
+@patch("pipeline.embedder.FaceAligner")
+def test_exception_in_align_does_not_crash_thread(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
     state.clear()
 
-    mock_app = MagicMock()
-    mock_app.get.side_effect = RuntimeError("model error")
-    mock_fa_cls.return_value = mock_app
+    mock_aligner = MagicMock()
+    mock_aligner.align.side_effect = RuntimeError("align error")
+    mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
@@ -122,15 +135,12 @@ def test_embedder_stores_name_on_match():
 
     state.clear()
 
-    mock_app = MagicMock()
-    mock_face = MagicMock()
     known_emb = np.ones(512, dtype=np.float32)
-    mock_face.embedding = known_emb.copy()
-    mock_app.get.return_value = [mock_face]
-
     known_faces = {"TestPerson": known_emb.copy()}
 
-    with patch("pipeline.embedder.FaceAnalysis", return_value=mock_app):
+    mock_aligner = _make_mock_aligner(embedding=known_emb.copy())
+
+    with patch("pipeline.embedder.FaceAligner", return_value=mock_aligner):
         crop_q: queue.Queue = queue.Queue()
         stop = threading.Event()
         thread = EmbedderThread(crop_q, stop, known_faces=known_faces)

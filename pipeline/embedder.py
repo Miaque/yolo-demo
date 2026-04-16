@@ -1,11 +1,14 @@
 # pipeline/embedder.py
 import queue
 import threading
-import numpy as np
+from pathlib import Path
+
 import cv2
-from insightface.app import FaceAnalysis
+import numpy as np
 from loguru import logger
+
 from config import settings
+from pipeline.aligner import FaceAligner
 import state
 
 
@@ -35,7 +38,7 @@ def match_name(
 
 
 class EmbedderThread(threading.Thread):
-    """后台线程：从 face_crop_queue 取人脸裁剪图，调用 InsightFace 提取 Embedding。"""
+    """后台线程：从 face_crop_queue 取人脸裁剪图，通过 FaceAligner 对齐并提取 Embedding。"""
 
     def __init__(
         self,
@@ -47,38 +50,45 @@ class EmbedderThread(threading.Thread):
         self.face_crop_queue = face_crop_queue
         self.stop_event = stop_event
         self.known_faces = known_faces or {}
-        self._app = FaceAnalysis(
-            name=settings.INSIGHTFACE_MODEL,
-            providers=["CPUExecutionProvider"],
-        )
-        self._app.prepare(ctx_id=0, det_size=settings.INSIGHTFACE_DET_SIZE)
+        self._aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
+        self._align_count = 0
 
     def run(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                track_id, face_crop = self.face_crop_queue.get(timeout=0.5)
-                self._process(track_id, face_crop)
-            except queue.Empty:
-                continue
-
-    _crop_count = 0
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    track_id, face_crop = self.face_crop_queue.get(timeout=0.5)
+                    self._process(track_id, face_crop)
+                except queue.Empty:
+                    continue
+        finally:
+            self._aligner.close()
 
     def _process(self, track_id: int, face_crop: np.ndarray) -> None:
         try:
-            # DEBUG: 保存所有裁剪图用于排查
-            from pathlib import Path
-            debug_dir = Path("output/debug_crops")
-            debug_dir.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(debug_dir / f"crop_{track_id}_{self._crop_count}.jpg"), face_crop)
-            logger.info("DEBUG saved crop: output/debug_crops/crop_{}_{}.jpg shape={}", track_id, self._crop_count, face_crop.shape)
-            self._crop_count += 1
+            result = self._aligner.align(face_crop)
+            if result is None:
+                return
 
-            results = self._app.get(face_crop)
-            if results:
-                embedding = results[0].embedding
-                state.set_embedding(track_id, embedding)
-                name = match_name(embedding, self.known_faces)
-                logger.info("track_id={} matched='{}' emb_norm={:.4f}", track_id, name, float(np.linalg.norm(embedding)))
-                state.set_name(track_id, name)
+            # DEBUG: 保存对齐后的标准化人脸图
+            debug_dir = Path("output/debug_aligned")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            debug_path = debug_dir / f"align_{track_id}_{self._align_count}.jpg"
+            cv2.imwrite(str(debug_path), result.aligned_face)
+            logger.info(
+                "DEBUG saved aligned: {} shape={}", debug_path, result.aligned_face.shape
+            )
+            self._align_count += 1
+
+            # 存储 embedding 和匹配名字
+            state.set_embedding(track_id, result.embedding)
+            name = match_name(result.embedding, self.known_faces)
+            logger.info(
+                "track_id={} matched='{}' emb_norm={:.4f}",
+                track_id,
+                name,
+                float(np.linalg.norm(result.embedding)),
+            )
+            state.set_name(track_id, name)
         except Exception:
-            logger.exception("InsightFace failed for track_id={}", track_id)
+            logger.exception("FaceAligner failed for track_id={}", track_id)
