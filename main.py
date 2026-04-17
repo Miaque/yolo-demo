@@ -9,7 +9,7 @@ import numpy as np
 from loguru import logger
 from config import settings
 import overlay
-import state
+from state import TrackState
 from pipeline.detector import FaceDetector
 from pipeline.embedder import EmbedderThread
 from pipeline.reader import ReaderThread
@@ -67,104 +67,136 @@ def _load_known_faces(aligner: FaceAligner) -> dict[str, np.ndarray]:
     return known_faces
 
 
-def run() -> None:
-    stop_event = threading.Event()
+class Pipeline:
+    """人脸检测管线：组装所有组件，管理生命周期。"""
 
-    frame_queue: queue.Queue = queue.Queue(maxsize=settings.FRAME_QUEUE_SIZE)
-    face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
-    output_queue: queue.Queue = queue.Queue(maxsize=settings.OUTPUT_QUEUE_SIZE)
+    def __init__(self) -> None:
+        self._stop_event = threading.Event()
+        self._track_state = TrackState()
+        self._submitted_ids: set[int] = set()
+        self._frame_count = 0
 
-    detector = FaceDetector()
-    tracker = FaceTracker()
+    def run(self) -> None:
+        self._build()
+        self._register_signals()
+        self._start_threads()
+        try:
+            self._loop()
+        finally:
+            self._shutdown()
 
-    # 创建 FaceAligner 并用于加载已知人脸，确保 embedding 空间一致
-    known_face_aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
-    try:
-        known_faces = _load_known_faces(known_face_aligner)
-    finally:
-        known_face_aligner.close()
+    def _build(self) -> None:
+        """初始化队列、检测器、跟踪器、工作线程。"""
+        self._frame_queue: queue.Queue = queue.Queue(maxsize=settings.FRAME_QUEUE_SIZE)
+        self._face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
+        self._output_queue: queue.Queue = queue.Queue(maxsize=settings.OUTPUT_QUEUE_SIZE)
 
-    output_path = f"{settings.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        self._detector = FaceDetector()
+        self._tracker = FaceTracker()
 
-    reader = ReaderThread(frame_queue, stop_event)
-    embedder = EmbedderThread(face_crop_queue, stop_event, known_faces=known_faces)
-    writer = WriterThread(output_queue, stop_event, output_path=output_path)
+        # 创建 FaceAligner 并用于加载已知人脸，确保 embedding 空间一致
+        known_face_aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
+        try:
+            known_faces = _load_known_faces(known_face_aligner)
+        finally:
+            known_face_aligner.close()
 
-    known_ids: set[int] = set()
+        output_path = f"{settings.OUTPUT_DIR}/output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
 
-    def _handle_signal(sig, _frame) -> None:
-        logger.info("Signal {} received, shutting down…", sig)
-        stop_event.set()
+        self._reader = ReaderThread(self._frame_queue, self._stop_event)
+        self._embedder = EmbedderThread(
+            self._face_crop_queue, self._stop_event,
+            self._track_state, known_faces=known_faces,
+        )
+        self._writer = WriterThread(self._output_queue, self._stop_event, output_path=output_path)
 
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
+    def _register_signals(self) -> None:
+        def _handle_signal(sig, _frame) -> None:
+            logger.info("Signal {} received, shutting down…", sig)
+            self._stop_event.set()
 
-    reader.start()
-    embedder.start()
-    writer.start()
-    logger.info("Pipeline started. Input: {}, Output: {}", settings.RTSP_INPUT, output_path)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
 
-    frame_count = 0
-    track_results: list[tuple[int, list[int]]] = []
+    def _start_threads(self) -> None:
+        self._reader.start()
+        self._embedder.start()
+        self._writer.start()
+        logger.info(
+            "Pipeline started. Input: {}, Output: {}",
+            settings.RTSP_INPUT,
+            self._writer.output_path,
+        )
 
-    try:
-        while not stop_event.is_set():
+    def _loop(self) -> None:
+        track_results: list[tuple[int, list[int]]] = []
+
+        while not self._stop_event.is_set():
             try:
-                frame = frame_queue.get(timeout=1.0)
+                frame = self._frame_queue.get(timeout=1.0)
             except queue.Empty:
-                if frame_count > 0 and frame_count % 50 == 0:
-                    logger.info("Main: frame_queue empty after {} frames", frame_count)
+                if self._frame_count > 0 and self._frame_count % 50 == 0:
+                    logger.info("Main: frame_queue empty after {} frames", self._frame_count)
                 continue
 
-            frame_count += 1
-            if frame_count % 100 == 0:
+            self._step(frame, track_results)
+
+    def _step(
+        self,
+        frame: np.ndarray,
+        track_results: list[tuple[int, list[int]]],
+    ) -> None:
+        self._frame_count += 1
+        if self._frame_count % 100 == 0:
+            logger.info(
+                "Main: frame {} | frame_q={} crop_q={} out_q={}",
+                self._frame_count, self._frame_queue.qsize(),
+                self._face_crop_queue.qsize(), self._output_queue.qsize(),
+            )
+
+        if self._frame_count % settings.DETECT_INTERVAL == 0:
+            t0 = time.monotonic()
+            detections = self._detector.detect(frame)
+            t1 = time.monotonic()
+            track_results.clear()
+            track_results.extend(self._tracker.update(detections, frame))
+            t2 = time.monotonic()
+            if self._frame_count <= 20 or self._frame_count % 100 == 0:
                 logger.info(
-                    "Main: frame {} | frame_q={} crop_q={} out_q={}",
-                    frame_count, frame_queue.qsize(),
-                    face_crop_queue.qsize(), output_queue.qsize(),
+                    "Main: frame {} detect={:.0f}ms track={:.0f}ms dets={}",
+                    self._frame_count, (t1 - t0) * 1000, (t2 - t1) * 1000,
+                    len(detections),
                 )
 
-            if frame_count % settings.DETECT_INTERVAL == 0:
-                t0 = time.monotonic()
-                detections = detector.detect(frame)
-                t1 = time.monotonic()
-                track_results = tracker.update(detections, frame)
-                t2 = time.monotonic()
-                if frame_count <= 20 or frame_count % 100 == 0:
-                    logger.info(
-                        "Main: frame {} detect={:.0f}ms track={:.0f}ms dets={}",
-                        frame_count, (t1 - t0) * 1000, (t2 - t1) * 1000,
-                        len(detections),
-                    )
+            for removed_id in self._tracker.removed_ids():
+                self._submitted_ids.discard(removed_id)
+                self._track_state.remove_embedding(removed_id)
+        else:
+            track_results.clear()
+            track_results.extend(self._tracker.predict())
 
-                for removed_id in tracker.removed_ids():
-                    known_ids.discard(removed_id)
-                    state.remove_embedding(removed_id)
-            else:
-                track_results = tracker.predict()
+        for track_id, bbox in track_results:
+            if track_id not in self._submitted_ids:
+                self._submitted_ids.add(track_id)
+                face_crop = _crop_with_margin(frame, bbox)
+                try:
+                    self._face_crop_queue.put_nowait((track_id, face_crop))
+                except queue.Full:
+                    pass  # 队列已满，跳过此帧
 
-            for track_id, bbox in track_results:
-                if track_id not in known_ids:
-                    known_ids.add(track_id)
-                    face_crop = _crop_with_margin(frame, bbox)
-                    try:
-                        face_crop_queue.put_nowait((track_id, face_crop))
-                    except queue.Full:
-                        pass  # InsightFace 队列已满，跳过此帧
+        emb_snapshot, name_snapshot = self._track_state.snapshot()
+        annotated = overlay.draw_tracks(frame, track_results, emb_snapshot, name_snapshot)
+        try:
+            self._output_queue.put_nowait(annotated)
+        except queue.Full:
+            logger.warning("Main: output_queue full, dropping frame {}", self._frame_count)
 
-            emb_snapshot, name_snapshot = state.snapshot()
-            annotated = overlay.draw_tracks(frame, track_results, emb_snapshot, name_snapshot)
-            try:
-                output_queue.put_nowait(annotated)
-            except queue.Full:
-                logger.warning("Main: output_queue full, dropping frame {}", frame_count)
-
-    finally:
-        stop_event.set()
-        for t in (reader, embedder, writer):
+    def _shutdown(self) -> None:
+        self._stop_event.set()
+        for t in (self._reader, self._embedder, self._writer):
             t.join(timeout=5)
         logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":
-    run()
+    Pipeline().run()
