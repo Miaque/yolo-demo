@@ -10,7 +10,8 @@
       "Bash(uv --version)",
       "Bash(pip --version)",
       "Bash(git stash *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(uv pip *)"
     ]
   }
 }
