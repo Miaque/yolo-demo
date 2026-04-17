@@ -1,15 +1,13 @@
 # pipeline/embedder.py
 import queue
 import threading
-from pathlib import Path
 
-import cv2
 import numpy as np
 from loguru import logger
 
 from config import settings
+from state import TrackState
 from pipeline.aligner import FaceAligner
-import state
 
 
 def match_name(
@@ -44,14 +42,15 @@ class EmbedderThread(threading.Thread):
         self,
         face_crop_queue: queue.Queue,
         stop_event: threading.Event,
+        track_state: TrackState,
         known_faces: dict[str, np.ndarray] | None = None,
     ) -> None:
         super().__init__(daemon=True, name="embedder")
         self.face_crop_queue = face_crop_queue
         self.stop_event = stop_event
+        self.track_state = track_state
         self.known_faces = known_faces or {}
         self._aligner = FaceAligner(backend=settings.ALIGNMENT_BACKEND)
-        self._align_count = 0
 
     def run(self) -> None:
         try:
@@ -70,18 +69,8 @@ class EmbedderThread(threading.Thread):
             if result is None:
                 return
 
-            # DEBUG: 保存对齐后的标准化人脸图
-            debug_dir = Path("output/debug_aligned")
-            debug_dir.mkdir(parents=True, exist_ok=True)
-            debug_path = debug_dir / f"align_{track_id}_{self._align_count}.jpg"
-            cv2.imwrite(str(debug_path), result.aligned_face)
-            logger.info(
-                "DEBUG saved aligned: {} shape={}", debug_path, result.aligned_face.shape
-            )
-            self._align_count += 1
-
             # 存储 embedding 和匹配名字
-            state.set_embedding(track_id, result.embedding)
+            self.track_state.set_embedding(track_id, result.embedding)
             name = match_name(result.embedding, self.known_faces)
             logger.info(
                 "track_id={} matched='{}' emb_norm={:.4f}",
@@ -89,6 +78,6 @@ class EmbedderThread(threading.Thread):
                 name,
                 float(np.linalg.norm(result.embedding)),
             )
-            state.set_name(track_id, name)
+            self.track_state.set_name(track_id, name)
         except Exception:
             logger.exception("FaceAligner failed for track_id={}", track_id)

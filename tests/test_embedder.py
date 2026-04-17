@@ -3,7 +3,7 @@ import threading
 import time
 import numpy as np
 from unittest.mock import MagicMock, patch
-import state
+from state import TrackState
 
 
 def _make_mock_aligner(embedding: np.ndarray | None = None, aligned_face: np.ndarray | None = None):
@@ -27,14 +27,13 @@ def _make_mock_aligner(embedding: np.ndarray | None = None, aligned_face: np.nda
 def test_embedding_stored_on_success(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
-    state.clear()
-
+    ts = TrackState()
     mock_aligner = _make_mock_aligner(embedding=np.ones(512, dtype=np.float32))
     mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
-    thread = EmbedderThread(crop_q, stop)
+    thread = EmbedderThread(crop_q, stop, ts)
 
     crop_q.put((42, np.zeros((100, 100, 3), dtype=np.uint8)))
 
@@ -43,7 +42,7 @@ def test_embedding_stored_on_success(mock_aligner_cls):
     stop.set()
     thread.join(timeout=2)
 
-    result = state.get_embedding(42)
+    result = ts.get_embedding(42)
     assert result is not None
     np.testing.assert_array_equal(result, np.ones(512, dtype=np.float32))
 
@@ -52,14 +51,13 @@ def test_embedding_stored_on_success(mock_aligner_cls):
 def test_empty_result_not_stored(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
-    state.clear()
-
+    ts = TrackState()
     mock_aligner = _make_mock_aligner(embedding=None)
     mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
-    thread = EmbedderThread(crop_q, stop)
+    thread = EmbedderThread(crop_q, stop, ts)
 
     crop_q.put((99, np.zeros((100, 100, 3), dtype=np.uint8)))
 
@@ -68,22 +66,21 @@ def test_empty_result_not_stored(mock_aligner_cls):
     stop.set()
     thread.join(timeout=2)
 
-    assert state.get_embedding(99) is None
+    assert ts.get_embedding(99) is None
 
 
 @patch("pipeline.embedder.FaceAligner")
 def test_exception_in_align_does_not_crash_thread(mock_aligner_cls):
     from pipeline.embedder import EmbedderThread
 
-    state.clear()
-
+    ts = TrackState()
     mock_aligner = MagicMock()
     mock_aligner.align.side_effect = RuntimeError("align error")
     mock_aligner_cls.return_value = mock_aligner
 
     crop_q: queue.Queue = queue.Queue()
     stop = threading.Event()
-    thread = EmbedderThread(crop_q, stop)
+    thread = EmbedderThread(crop_q, stop, ts)
 
     crop_q.put((7, np.zeros((100, 100, 3), dtype=np.uint8)))
 
@@ -102,7 +99,6 @@ def test_cosine_match_identifies_known_face():
     known_emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     known_faces = {"Alice": known_emb}
 
-    # 相同方向 → 匹配
     query = np.array([0.9, 0.1, 0.0], dtype=np.float32)
     result = match_name(query, known_faces, threshold=0.5)
     assert result == "Alice"
@@ -115,7 +111,6 @@ def test_cosine_no_match_returns_unknown():
     known_emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     known_faces = {"Alice": known_emb}
 
-    # 几乎正交 → 不匹配
     query = np.array([0.0, 1.0, 0.0], dtype=np.float32)
     result = match_name(query, known_faces, threshold=0.5)
     assert result == "Unknown"
@@ -133,8 +128,7 @@ def test_embedder_stores_name_on_match():
     """EmbedderThread 处理后应同时存储 embedding 和 name。"""
     from pipeline.embedder import EmbedderThread
 
-    state.clear()
-
+    ts = TrackState()
     known_emb = np.ones(512, dtype=np.float32)
     known_faces = {"TestPerson": known_emb.copy()}
 
@@ -143,7 +137,7 @@ def test_embedder_stores_name_on_match():
     with patch("pipeline.embedder.FaceAligner", return_value=mock_aligner):
         crop_q: queue.Queue = queue.Queue()
         stop = threading.Event()
-        thread = EmbedderThread(crop_q, stop, known_faces=known_faces)
+        thread = EmbedderThread(crop_q, stop, ts, known_faces=known_faces)
 
         crop_q.put((42, np.zeros((100, 100, 3), dtype=np.uint8)))
         thread.start()
@@ -151,4 +145,4 @@ def test_embedder_stores_name_on_match():
         stop.set()
         thread.join(timeout=2)
 
-    assert state.get_name(42) == "TestPerson"
+    assert ts.get_name(42) == "TestPerson"
