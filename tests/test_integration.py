@@ -3,10 +3,9 @@
 不依赖真实 RTSP 流、YOLO 模型或 InsightFace。
 """
 import queue
-import threading
 import numpy as np
 from unittest.mock import MagicMock, patch
-import state
+from state import TrackState
 import overlay
 from config import settings
 
@@ -34,16 +33,12 @@ def test_pipeline_loop_processes_frames(mock_yolo_cls, mock_bt_cls):
     mock_bt.update.return_value = np.empty((0, 8), dtype=np.float32)
     mock_bt_cls.return_value = mock_bt
 
-    state.clear()
+    ts = TrackState()
     frame_queue: queue.Queue = queue.Queue(maxsize=10)
-    face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
     output_queue: queue.Queue = queue.Queue(maxsize=10)
-    stop_event = threading.Event()
 
     detector = FaceDetector()
     tracker = FaceTracker()
-
-    known_ids: set[int] = set()
     track_results: list = []
     frame_count = 0
 
@@ -62,8 +57,8 @@ def test_pipeline_loop_processes_frames(mock_yolo_cls, mock_bt_cls):
         else:
             track_results = tracker.predict()
 
-        emb_snapshot = state.snapshot()
-        annotated = overlay.draw_tracks(frame, track_results, emb_snapshot)
+        emb_snapshot, name_snapshot = ts.snapshot()
+        annotated = overlay.draw_tracks(frame, track_results, emb_snapshot, name_snapshot)
         output_queue.put_nowait(annotated)
 
     assert output_queue.qsize() == 10
@@ -93,12 +88,11 @@ def test_new_track_id_queued_for_embedding(mock_yolo_cls, mock_bt_cls):
     )
     mock_bt_cls.return_value = mock_bt
 
-    state.clear()
     face_crop_queue: queue.Queue = queue.Queue(maxsize=settings.FACE_CROP_QUEUE_SIZE)
 
     detector = FaceDetector()
     tracker = FaceTracker()
-    known_ids: set[int] = set()
+    submitted_ids: set[int] = set()
 
     frame = _make_frame()
     # 触发检测帧
@@ -106,8 +100,8 @@ def test_new_track_id_queued_for_embedding(mock_yolo_cls, mock_bt_cls):
     track_results = tracker.update(detections, frame)
 
     for track_id, bbox in track_results:
-        if track_id not in known_ids:
-            known_ids.add(track_id)
+        if track_id not in submitted_ids:
+            submitted_ids.add(track_id)
             x1, y1, x2, y2 = bbox
             face_crop = frame[max(0, y1):min(frame.shape[0], y2),
                               max(0, x1):min(frame.shape[1], x2)].copy()
